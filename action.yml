@@ -1,0 +1,75 @@
+name: Sightline map changes
+description: Comments on pull requests with what they change in the map of a .NET solution - endpoints, request flows, services, problems.
+author: Revington Corporations
+branding:
+  icon: map
+  color: blue
+
+inputs:
+  solution:
+    description: The .sln, .slnx or .csproj to read. Default - the one named in sightline.json, or the nearest solution at the repository root.
+    required: false
+    default: ''
+  version:
+    description: The Sightline version to run, such as 0.4.0. Default - the latest release.
+    required: false
+    default: ''
+  command:
+    description: Run Sightline this way instead, such as "dotnet sightline" in a repository set up with "sightline init" (then run "dotnet tool restore" in a step before this one).
+    required: false
+    default: ''
+  comment:
+    description: Post the result as a comment on the pull request, and update that comment on later pushes.
+    required: false
+    default: 'true'
+  fail-on:
+    description: Fail the check when the pull request adds problems of this level - error, warning or never.
+    required: false
+    default: 'never'
+  github-token:
+    description: Token used to post the comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  markdown:
+    description: Path of the markdown file with the result.
+    value: ${{ steps.diff.outputs.markdown }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Compare the maps
+      id: diff
+      shell: bash
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+        SOLUTION: ${{ inputs.solution }}
+        VERSION: ${{ inputs.version }}
+        COMMAND: ${{ inputs.command }}
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: bash "$GITHUB_ACTION_PATH/diff.sh"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+        FILE: ${{ steps.diff.outputs.markdown }}
+      run: bash "$GITHUB_ACTION_PATH/comment.sh"
+
+    - name: Fail on new problems
+      if: steps.diff.outputs.failed == 'true'
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        echo "::error title=Sightline::This pull request adds problems at level \"$FAIL_ON\" or worse. The comment and the job summary list them."
+        exit 1
